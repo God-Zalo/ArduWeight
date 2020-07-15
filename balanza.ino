@@ -1,24 +1,98 @@
+// ADC library
 #include "HX711.h"
 
+// Ethernet library
+#include <SPI.h>
+#include <Ethernet.h>
+
+// ADC Pinout
 const int DOUT=A1;
 const int CLK=A0;
 
 HX711 balanza;
 
+// Enter a MAC address and IP address for your controller below.
+// The IP address will be dependent on your local network:
+byte mac[] = { 
+  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(192,168,1,177);
+
+// Initialize the Ethernet server library
+// with the IP address and port you want to use 
+// (port 80 is default for HTTP):
+EthernetServer server(80);
+
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
+   while (!Serial) {
+    ; // wait for serial port to connect.
+  }
+
   balanza.begin(DOUT, CLK);
-  Serial.print("Lectura del valor del ADC:  ");
+  Serial.print("Read from ADC:  ");
   Serial.println(balanza.read());
-  Serial.println("No ponga ningun  objeto sobre la balanza");
-  Serial.println("Destarando...");
+  Serial.println("De-taring...");
   Serial.println("...");
-  balanza.set_scale(429.3); // Establecemos la escala
-  balanza.tare(50);  //El peso actual es considerado Tara.
-  
-  Serial.println("Listo para pesar");  
+  balanza.set_scale(429.2); // Scale
+  balanza.tare(50);  //Actual weight is considered Tare.
+
+  // start the Ethernet connection and the server:
+  Ethernet.begin(mac, ip);
+  server.begin();
+  Serial.print("server is at ");
+  Serial.println(Ethernet.localIP());
+
+  Serial.println("Ready to measure");  
 }
 
+
 void loop() {
-  Serial.println(balanza.get_units(20),2);
+  // Get weight
+  float weight = balanza.get_units(20);
+  
+  // listen for incoming clients
+  EthernetClient client = server.available();
+  if (client) {
+    Serial.println("new client");
+    // an http request ends with a blank line
+    boolean currentLineIsBlank = true;
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+        // if you've gotten to the end of the line (received a newline
+        // character) and the line is blank, the http request has ended,
+        // so you can send a reply
+        if (c == '\n' && currentLineIsBlank) {
+          // send a standard http response header
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/html");
+          client.println("Connection: close");
+          client.println();
+          client.println("<!DOCTYPE HTML>");
+          client.println("<html>");
+          // add a meta refresh tag, so the browser pulls again every 5 seconds:
+          client.println("<meta http-equiv=\"refresh\" content=\"0.5\">");
+          // output the value of each analog input pin
+          client.print(weight);
+          client.println("<br />");       
+          client.println("</html>");
+          break;
+        }
+        if (c == '\n') {
+          // you're starting a new line
+          currentLineIsBlank = true;
+        } 
+        else if (c != '\r') {
+          // you've gotten a character on the current line
+          currentLineIsBlank = false;
+        }
+      }
+    }
+    // give the web browser time to receive the data
+    delay(0.5);
+    // close the connection:
+    client.stop();
+    Serial.println("client disonnected");
+  }
 }
